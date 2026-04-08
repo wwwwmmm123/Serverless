@@ -107,7 +107,7 @@ pub const SCALE_DOWN_EXEC_NAMES: [&'static str; 1] = ["default"];
 pub const SCALE_UP_EXEC_NAMES: [&'static str; 2] = ["least_task", "no"];
 pub const MECH_NAMES: [&'static str; 3] = ["no_scale", "scale_sche_separated", "scale_sche_joint"];
 pub const FILTER_NAMES: [&'static str; 1] = ["careful_down"];
-pub const INSTANCE_LIVE_NAMES: [&'static str; 3] = ["no_evict", "lru", "fifo"];
+pub const INSTANCE_LIVE_NAMES: [&'static str; 6] = ["no_evict", "lru", "fifo", "weighted_lru", "partitioned", "env_aware_lru"];
 
 pub trait Mechanism: Send {
     fn step(

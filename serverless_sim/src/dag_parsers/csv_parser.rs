@@ -7,8 +7,6 @@ use csv::ReaderBuilder;
 
 use crate::sim_env::SimEnv;
 
-use crate::sim_env::{self, SimEnv};
-
 #[derive(Debug)]
 pub struct TaskInfo {
     pub task_name: String,

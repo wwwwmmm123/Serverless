@@ -22,8 +22,9 @@ pub fn start_gc() {
 
                 for e in sim_envs.iter() {
                     let env = e.1.lock();
-                    // 检查当前时间是否已经超过环境最近使用时间加上 60 秒
-                    if now > Duration::from_secs(60) + env.recent_use_time {
+                    // 检查当前时间是否已经超过环境最近使用时间加上 20 秒
+                    // 降低为 20 秒以加快内存释放，避免 OOM
+                    if now > Duration::from_secs(20) + env.recent_use_time {
                         let key = env.help.config().str();
                         log::warn!("gc env {}", key);
                         env.help.metric_record().as_ref().unwrap().flush(&env);

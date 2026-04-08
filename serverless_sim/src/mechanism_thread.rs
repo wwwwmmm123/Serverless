@@ -85,7 +85,9 @@ fn mechanism_loop(rx: mpsc::Receiver<MechScheduleOnce>, mech: MechanismImpl) {
                 mech_run_ms: mech_latency,
                 //  (passed_ms.0 + passed_ms.1) / 10000,
             })
-            .unwrap();
+            .unwrap_or_else(|e| {
+                log::error!("Failed to send mechanism result: {:?}", e);
+            });
     }
 }
 

@@ -123,15 +123,18 @@ impl Scheduler for EnsureScheduler {
                     // 如果该容器最近50帧都是空闲则缩容
                     if container.recent_frame_is_idle(50) && container.req_fn_state.len() == 0  {
                         // 发送缩容命令
-                        cmd_distributor
+                        if let Err(e) = cmd_distributor
                             .send(MechScheduleOnceRes::ScaleDownCmd(DownCmd 
                                 {
                                     nid: container.node_id,
                                     fnid: func.fn_id
                                 }
-                            ))
-                            .unwrap();
-                        nodes.remove(&container.node_id);
+                            )) {
+                            log::error!("Failed to send scale down command for fn {} on node {}: {:?}", 
+                                func.fn_id, container.node_id, e);
+                        } else {
+                            nodes.remove(&container.node_id);
+                        }
                     }
                 });
             }
@@ -140,6 +143,7 @@ impl Scheduler for EnsureScheduler {
             self.fn_nodes.insert(func.fn_id, nodes.clone());
         }
 
+        let mut mechanism_failed = false;
         for (_req_id, req) in env.core().requests().iter() {
             let fns = schedule_helper::collect_task_to_sche(
                 req,
@@ -154,15 +158,35 @@ impl Scheduler for EnsureScheduler {
                 log::info!("schedule fn {} to node {}", fnid, sche_nodeid);
 
                 if sche_nodeid != 9999 {
-                    cmd_distributor
+                    if let Err(e) = cmd_distributor
                         .send(MechScheduleOnceRes::ScheCmd(ScheCmd {
                             nid: sche_nodeid,
                             reqid: req.req_id,
                             fnid,
                             memlimit: None,
-                        }))
-                        .unwrap();
-                    self.node_cpu_usage.get_mut(&sche_nodeid).unwrap().all_task_cnt += 1.0;
+                        })) {
+                        // 发送失败，通常是 mechanism 线程已崩溃
+                        // 只打印第一次错误，避免日志洪水
+                        if !mechanism_failed {
+                            log::error!("Failed to send schedule command (mechanism thread may have crashed): {:?}. Suppressing further errors.", e);
+                            mechanism_failed = true;
+                        }
+                        
+                        // 更新状态以避免无限重试
+                        if let Some(node_usage) = self.node_cpu_usage.get_mut(&sche_nodeid) {
+                            node_usage.all_task_cnt += 1.0;
+                        }
+                        
+                        // 跳过当前函数，继续下一个
+                        continue;
+                    }
+                    
+                    // 发送成功，更新状态
+                    if let Some(node_usage) = self.node_cpu_usage.get_mut(&sche_nodeid) {
+                        node_usage.all_task_cnt += 1.0;
+                    } else {
+                        log::warn!("Node {} not found in cpu_usage map", sche_nodeid);
+                    }
                 }
             }
 

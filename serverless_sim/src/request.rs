@@ -125,7 +125,7 @@ impl Request {
             let parents: Vec<_> = dag
                 .dag_inner
                 .graph()
-                .neighbors_directed(node_idx, petgraph::Direction::Incoming)
+                .neighbors_directed(node_idx, daggy::petgraph::Direction::Incoming)
                 .collect();
 
             // 如果当前节点没有父节点，则说明它没有前驱任务
@@ -169,7 +169,7 @@ impl Request {
                     Some(
                         dag.dag_inner
                             .graph()
-                            .neighbors_directed(node_idx, petgraph::Direction::Incoming) 
+                            .neighbors_directed(node_idx, daggy::petgraph::Direction::Incoming) 
                             .map(|parent_idx| dag.dag_inner[parent_idx]) 
                             .collect::<HashSet<_>>(), 
                     )

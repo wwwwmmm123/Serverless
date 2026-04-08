@@ -7,7 +7,7 @@ use crate::{
     fn_dag::FnId,
     mechanism_conf::ModuleMechConf,
     sim_env::SimEnv,
-    util::Window,
+    util::{Window, EwmaWindow},
 };
 use chrono;
 use serde::{ Deserialize, Serialize };
@@ -49,10 +49,37 @@ use std::{ collections::{ BTreeMap, HashMap }, fs::{ self, File }, io::{ Read, W
 //     cost: f32,
 //     score:f32,
 // }
+
+/// 频率统计模式
+#[derive(Clone, Debug)]
+pub enum FrequencyTracker {
+    FixedWindow(Window),     // 固定窗口统计
+    Ewma(EwmaWindow),        // EWMA衰减统计
+}
+
+impl FrequencyTracker {
+    fn push(&mut self, value: f32) {
+        match self {
+            FrequencyTracker::FixedWindow(w) => w.push(value),
+            FrequencyTracker::Ewma(e) => e.push(value),
+        }
+    }
+
+    fn avg(&self) -> f32 {
+        match self {
+            FrequencyTracker::FixedWindow(w) => w.avg(),
+            FrequencyTracker::Ewma(e) => e.avg(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct MechMetric {
     // 函数-窗口，窗口中记录了该函数在 窗口长度 中被请求但还未被调度的次数
-    fn_recent_req_cnt_window: HashMap<FnId, Window>,
+    fn_recent_req_cnt_window: HashMap<FnId, FrequencyTracker>,
+    
+    // 是否使用EWMA模式
+    use_ewma: bool,
 
     // 函数-未被调度的数量
     fn_unsche_req_cnt: HashMap<FnId, usize>,
@@ -68,8 +95,19 @@ pub struct MechMetric {
 
 impl MechMetric {
     pub fn new() -> Self {
+        Self::new_with_mode(false)
+    }
+
+    pub fn new_with_mode(use_ewma: bool) -> Self {
+        if use_ewma {
+            log::info!("MechMetric: Using EWMA for request frequency tracking (alpha=0.3)");
+        } else {
+            log::info!("MechMetric: Using Fixed Window for request frequency tracking (window=10)");
+        }
+        
         Self {
             fn_recent_req_cnt_window: HashMap::new(),
+            use_ewma,
             fn_unsche_req_cnt: HashMap::new(),
             node_task_new_cnt: HashMap::new(),
             fn_2_ready_sche_tasks: HashMap::new(),
@@ -133,12 +171,17 @@ impl MechMetric {
         for (fnid, count) in fn_count.iter() {
             // 如果目前对该函数没有记录，则先创建一个窗口
             if !self.fn_recent_req_cnt_window.contains_key(fnid) {
-                self.fn_recent_req_cnt_window.insert(*fnid, Window::new(10));
+                let tracker = if self.use_ewma {
+                    FrequencyTracker::Ewma(EwmaWindow::new_default())
+                } else {
+                    FrequencyTracker::FixedWindow(Window::new(10))
+                };
+                self.fn_recent_req_cnt_window.insert(*fnid, tracker);
             }
             // 更新记录
             self.fn_recent_req_cnt_window
                 .entry(*fnid)
-                .and_modify(|window| window.push(*count as f32));
+                .and_modify(|tracker| tracker.push(*count as f32));
         }
 
         // 遍历模拟环境中的每个节点
@@ -151,7 +194,7 @@ impl MechMetric {
     pub fn fn_recent_req_cnt(&self, fnid: FnId) -> f32 {
         self.fn_recent_req_cnt_window
             .get(&fnid)
-            .map(|v| v.avg())
+            .map(|tracker| tracker.avg())
             .unwrap_or(0.0)
     }
 
@@ -275,10 +318,16 @@ const FRAME_LEN: usize = 15;
 
 impl Recorder {
     pub fn new(mut key: String) -> Self {
-        // let args = parse_arg::get_arg();
-        // key = key.replace(":", "_");
-        // key = key.replace(",", ".");
-        // key = key.replace("\"", "");
+        // Replace invalid characters for Windows filenames
+        key = key.replace(":", "_");
+        key = key.replace(",", ".");
+        key = key.replace("\"", "");
+        key = key.replace("|", "_");
+        key = key.replace("<", "_");
+        key = key.replace(">", "_");
+        key = key.replace("?", "_");
+        key = key.replace("*", "_");
+        
         let record_name = format!(
             "{}.{}",
             key,
@@ -291,7 +340,10 @@ impl Recorder {
 
         //mkdir
         let _ = fs::create_dir("records");
-        let mut file = File::create(format!("records/{}.json", record_name)).unwrap();
+        let mut file = File::create(format!("records/{}.json", record_name))
+            .unwrap_or_else(|e| {
+                panic!("Failed to create record file '{}': {}", record_name, e);
+            });
 
         file.write_all(
             format!("\
@@ -425,7 +477,7 @@ impl RecordFile {
             no_mech_latency: false,
             // app_types: vec![],
             no_log: false,
-
+            use_ewma_freq: false,
             mech: ModuleMechConf::new().0,
             total_frame: 1000,
         };

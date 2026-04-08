@@ -309,7 +309,7 @@ impl SimEnv {
                 metric: RefCell::new(OneFrameMetric::new()),
                 metric_record: RefCell::new(Some(Recorder::new(config.str()))),
                 config: config.clone(),
-                mech_metric: RefCell::new(MechMetric::new()),
+                mech_metric: RefCell::new(MechMetric::new_with_mode(config.use_ewma_freq)),
                 dag_call_frequency: RefCell::new(BTreeMap::new()),
                 algo_exc_time: RefCell::new(HashMap::new()),
                 dag_accumulate_call_frequency: RefCell::new(BTreeMap::new()),

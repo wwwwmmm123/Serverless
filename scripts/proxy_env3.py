@@ -37,6 +37,8 @@ class ProxyEnv3:
         "fn_type": "cpu",
         "no_log": False,
         "total_frame":1000,
+        "use_ewma_freq": False,  # NEW: Default to false (fixed window)
+        "no_mech_latency": False,  # NEW: Default to false (include mechanism latency)
         # // optional
         "mech": {}
     }

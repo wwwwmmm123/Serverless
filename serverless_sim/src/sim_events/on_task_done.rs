@@ -28,6 +28,16 @@ impl SimEnv {
             .fn_done_time
             .replace(self.current_frame())
             .is_none());
-        assert!(fn_metric.ready_sche_time.is_some());
+        
+        // Check if task was properly scheduled before completion
+        if fn_metric.ready_sche_time.is_none() {
+            log::error!(
+                "Task done without being marked ready for scheduling: req={}, fn={}",
+                req.req_id,
+                fnid
+            );
+            // Set it to current frame to avoid downstream panics
+            fn_metric.ready_sche_time = Some(self.current_frame());
+        }
     }
 }

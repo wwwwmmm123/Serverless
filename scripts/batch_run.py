@@ -5,7 +5,7 @@ CUR_FDIR = os.path.dirname(CUR_FPATH)
 os.chdir(CUR_FDIR)
 
 import yaml,time
-with open("batch_run.yml", 'r') as stream:
+with open("batch_run.yml", 'r', encoding='utf-8') as stream:
     batchconf = yaml.safe_load(stream)
 
 
@@ -99,8 +99,13 @@ def params_compistion():
                 print("-"*40)
 
                 for i in range(needrun):
-                    env.reset()
-                    env.step(1)
+                    try:
+                        env.reset()
+                        env.step(1)
+                    except Exception as e:
+                        print(f"WARNING: Simulation failed: {e}")
+                        print("Continuing to next configuration...")
+                        break
                 
                 # mkdir ../serverless_sim/records
 #                 os.system(f"mkdir -p ../serverless_sim/records")
@@ -113,7 +118,7 @@ def params_compistion():
                 print("")
                 print("-"*40)
                 print("")
-                time.sleep(1)
+                time.sleep(2)  # 增加延迟到 2 秒，让 GC 有时间清理环境
                 # for t in range(run_time):
                     # print("run")
                     # env.run()

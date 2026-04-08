@@ -1,17 +1,21 @@
-run_time: 4
+run_time: 1
 
 params:
   request_freq:
   - low:
   - middle:
-  - high:
+  # - high:
   dag_type:
-  # - single:
-  # - mix:
+  - single:
+  # - chain:  # DISABLED - not supported by fn_dag.rs:559
   - dag:
+  # - mix:
   no_mech_latency:
   - true:
   # - false:
+  use_ewma_freq:  # NEW: Enable EWMA for frequency tracking
+  - false:  # Fixed window (baseline)
+  - true:   # EWMA (improvement 2)
 
 mech_scale_sche:
   scale_sche_joint:
@@ -69,7 +73,36 @@ mech_scale_sche:
 
 mech_other:
   instance_cache_policy:
-  - no_evict:
-  # - lru: 15
-  # - lru: 10
-  # - lru: 5
+  # ========== Baseline Strategies ==========
+  - lru: "10"                                      # Traditional LRU baseline
+  - fifo: "10"                                     # FIFO baseline
+  - no_evict:                                      # Ideal case (no eviction)
+  
+  # ========== New Strategy: Weighted LRU ==========
+  - weighted_lru: "10:r:0.5,f:0.5"                # Balanced weights
+  - weighted_lru: "10:r:0.7,f:0.3"                # Recency-biased
+  - weighted_lru: "10:r:0.3,f:0.7"                # Frequency-biased
+  
+  # ========== New Strategy: EnvAware LRU (Recommended) ==========
+  - env_aware_lru: "10:c:0.3,m:0.2,f:0.3,r:0.2"  # Balanced config (static)
+  - env_aware_lru: "10:c:0.5,m:0.1,f:0.3,r:0.1"  # Cold-start focused (static)
+  - env_aware_lru: "10:c:0.2,m:0.1,f:0.5,r:0.2"  # Frequency focused (static)
+  
+  # ========== NEW: Improvement 1 - Adaptive Weights ==========
+  - env_aware_lru: "10|adaptive"                  # Adaptive mode with default init
+  - env_aware_lru: "10|adaptive||c:0.5,m:0.1,f:0.3,r:0.1"  # Adaptive + custom init
+  
+  # ========== New Strategy: Partitioned Cache ==========
+  # TEMPORARILY DISABLED - causes GC timeout, needs investigation
+  # - partitioned: "10|equal"                       # Equal allocation (static)
+  # - partitioned: "10|cpu:0.5,data:0.3,mem:0.15,light:0.05"  # CPU-biased (static)
+  
+  # ========== NEW: Improvement 3 - Dynamic Partitioning ==========
+  # - partitioned: "10|dynamic"                     # Dynamic rebalancing + equal init
+  # - partitioned: "10|dynamic|cpu:0.5,data:0.3,mem:0.15,light:0.05"  # Dynamic + CPU init
+  
+  # ========== Capacity Comparison (Optional) ==========
+  # - lru: "5"                                     # Small capacity
+  # - lru: "15"                                    # Large capacity
+  # - env_aware_lru: "5:c:0.3,m:0.2,f:0.3,r:0.2"
+  # - env_aware_lru: "15:c:0.3,m:0.2,f:0.3,r:0.2"

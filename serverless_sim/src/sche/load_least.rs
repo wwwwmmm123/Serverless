@@ -84,14 +84,16 @@ impl Scheduler for LoadLeastScheduler {
                 log::info!("schedule fn {} to node {}", fnid, sche_nodeid);
 
                 if sche_nodeid != 9999 {
-                    cmd_distributor
+                    if let Err(e) = cmd_distributor
                         .send(MechScheduleOnceRes::ScheCmd(ScheCmd {
                             nid: sche_nodeid,
                             reqid: req.req_id,
                             fnid,
                             memlimit: None,
-                        }))
-                        .unwrap();
+                        })) {
+                        log::error!("Failed to send schedule command: {:?}", e);
+                        continue;
+                    }
 
                     let tasks_cnt = self.node_cpu_usage.get(&sche_nodeid).unwrap();
                     self.node_cpu_usage.insert(sche_nodeid, tasks_cnt + 1);

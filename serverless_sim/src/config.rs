@@ -45,6 +45,8 @@ pub struct Config {
     pub mech: MechConfig,
     /// whether to log the resultz
     pub no_log: bool,
+    /// Use EWMA for frequency tracking (default: false = fixed window)
+    pub use_ewma_freq: bool,
 }
 
 impl Config {
@@ -59,6 +61,7 @@ impl Config {
             mech: MechConfig::new_test(),
             no_mech_latency: true,
             no_log: true,
+            use_ewma_freq: false,
         }
     }
 

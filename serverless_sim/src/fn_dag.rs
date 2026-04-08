@@ -556,7 +556,13 @@ impl SimEnv {
                 }
             }
         } else {
-            panic!("not support dag type {}", self.help.config().dag_type);
+            log::error!("Unsupported dag type: {}. Using 'single' as fallback.", self.help.config().dag_type);
+            // 降级为 single 类型
+            for _ in 0..100 {
+                let dag_i = env.core.dags().len();
+                let dag = FnDAG::instance_single_fn(dag_i, env);
+                env.core.dags_mut().push(dag);
+            }
         }
     }
 
@@ -578,13 +584,16 @@ impl SimEnv {
         let dag = &env_dags[dag_i];
         for (_, pgi) in dag.dag_inner.parents(fngi).iter(&dag.dag_inner) {
             let p: FnId = dag.dag_inner[pgi];
-            let node = req.get_fn_node(p).unwrap();
-            need_node_data
-                .entry(node)
-                .and_modify(|v| {
-                    *v += env.core.fns()[p].out_put_size;
-                })
-                .or_insert(env.core.fns()[p].out_put_size);
+            if let Some(node) = req.get_fn_node(p) {
+                need_node_data
+                    .entry(node)
+                    .and_modify(|v| {
+                        *v += env.core.fns()[p].out_put_size;
+                    })
+                    .or_insert(env.core.fns()[p].out_put_size);
+            } else {
+                log::warn!("Parent function {} has no assigned node for req {}", p, req.req_id);
+            }
         }
         RunningTask {
             data_recv: need_node_data

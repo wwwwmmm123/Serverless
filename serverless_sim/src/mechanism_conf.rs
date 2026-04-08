@@ -180,10 +180,42 @@ impl MechConfig {
             }
             "fifo" => {
                 let limit = arg.parse::<usize>().expect("Please offer fifo cache policy arg");
-                Box::new(crate::cache::lru::LRUCache::new(limit))
+                Box::new(crate::cache::fifo::FifoCache::new(limit))
+            }
+            "weighted_lru" => {
+                // 格式: "capacity" 或 "capacity:r:0.6,f:0.4"
+                let parts: Vec<&str> = arg.split(':').collect();
+                let capacity = parts[0].parse::<usize>().expect("weighted_lru needs capacity");
+                let weight_config = if parts.len() > 1 {
+                    parts[1..].join(":")
+                } else {
+                    "default".to_string()
+                };
+                Box::new(crate::cache::weighted_lru::WeightedLRU::new(capacity, &weight_config))
+            }
+            "env_aware_lru" => {
+                // 格式: "capacity" 或 "capacity:c:0.3,m:0.2,f:0.3,r:0.2"
+                let parts: Vec<&str> = arg.split(':').collect();
+                let capacity = parts[0].parse::<usize>().expect("env_aware_lru needs capacity");
+                let weight_config = if parts.len() > 1 {
+                    parts[1..].join(":")
+                } else {
+                    "default".to_string()
+                };
+                Box::new(crate::cache::env_aware_lru::EnvAwareLRU::new(capacity, &weight_config))
+            }
+            "partitioned" => {
+                // 格式: "capacity|partition_config"
+                // 例如: "20|cpu:0.4,data:0.3,mem:0.2,light:0.1" 或 "20|equal"
+                let parts: Vec<&str> = arg.split('|').collect();
+                let capacity = parts.get(0)
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .expect("Please offer partitioned cache capacity (format: capacity|config)");
+                let partition_config = parts.get(1).map(|s| *s).unwrap_or("equal");
+                Box::new(crate::cache::partitioned_cache::PartitionedCache::new(capacity, partition_config))
             }
             "no_evict" => Box::new(crate::cache::no_evict::NoEvict::new()),
-            _ => panic!("new_instance_cache_policy"),
+            _ => panic!("new_instance_cache_policy: unknown policy {}", policy),
         }
     }
 

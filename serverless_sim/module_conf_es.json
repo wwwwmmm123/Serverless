@@ -5,13 +5,13 @@
     "scale_sche_separated": null
   },
   "scale_num": {
-    "no": null,
-    "full_placement": null,
-    "rela": null,
-    "ensure_scaler": null,
-    "hpa": null,
     "lass": null,
-    "temp_scaler": null
+    "temp_scaler": null,
+    "hpa": null,
+    "full_placement": null,
+    "no": null,
+    "rela": null,
+    "ensure_scaler": null
   },
   "scale_down_exec": {
     "default": null
@@ -21,25 +21,28 @@
     "least_task": null
   },
   "sche": {
-    "random": null,
+    "hash": null,
+    "bp_balance": null,
+    "faasflow": null,
+    "pass": null,
+    "fnsche": null,
     "greedy": null,
     "ensure_scheduler": null,
-    "pos": null,
-    "consistenthash": null,
-    "faasflow": null,
+    "random": null,
     "load_least": null,
-    "hash": null,
-    "pass": null,
-    "rotate": null,
-    "bp_balance": null,
-    "fnsche": null
+    "consistenthash": null,
+    "pos": null,
+    "rotate": null
   },
   "filter": {
     "careful_down": null
   },
   "instance_cache_policy": {
-    "fifo": null,
+    "weighted_lru": null,
     "no_evict": null,
+    "partitioned": null,
+    "fifo": null,
+    "env_aware_lru": null,
     "lru": null
   }
 }

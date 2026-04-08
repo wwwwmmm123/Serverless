@@ -257,17 +257,32 @@ impl Node {
             return;
         }
 
+        // 注入环境特征到缓存策略
+        self.inject_fn_feature_to_cache(fnid, env);
+
         let (old, flag) = unsafe {
             let node = NonNull::new_unchecked(self as *const Node as *mut Node);
+            let env_ptr = NonNull::new_unchecked(env as *const SimEnv as *mut SimEnv);
+            
             let (old, flag) = self.instance_cache_policy.borrow_mut().put(
                 fnid,
                 Box::new(move |to_replace| {
                     let node = node.as_ref();
+                    let _env = env_ptr.as_ref();
                     // log::info!("节点{}要移除的容器{}", node.node_id, to_replace);
                     for (_k, v) in node.fn_containers.borrow().iter() {
                         // log::info!("{}", v.fn_id);
                     }
-                    node.container(*to_replace).unwrap().is_idle()
+                    // 检查容器是否存在且是否空闲
+                    match node.container(*to_replace) {
+                        Some(container) => container.is_idle(),
+                        None => {
+                            // 容器已不存在，标记为可驱逐（让缓存策略清理这个无效条目）
+                            log::warn!("Container {} not found when checking eviction on node {}, mark as evictable to clean up", 
+                                to_replace, node.node_id);
+                            true // 返回true让缓存策略移除这个无效条目
+                        }
+                    }
                 }),
             );
             log::info!("old{:?}", old);
@@ -276,10 +291,16 @@ impl Node {
 
         // 可以增加该容器
         if flag {
-            // 1. 将old unload掉
+            // 1. 将old unload掉（但只在容器确实存在时）
             if old.is_some() {
-                self.try_unload_container(old.unwrap(), env, false);
-                log::info!("节点{}移除容器{}", self.node_id, old.unwrap());
+                let old_fnid = old.unwrap();
+                // 检查容器是否真的存在
+                if self.container(old_fnid).is_some() {
+                    self.try_unload_container(old_fnid, env, false);
+                    log::info!("节点{}移除容器{}", self.node_id, old_fnid);
+                } else {
+                    log::info!("缓存策略返回的容器{}已不存在，只清理缓存记录", old_fnid);
+                }
             }
             // 2. load 当前fnid
             // try cold start
@@ -314,6 +335,9 @@ impl Node {
     // 尝试加载节点上所有待处理任务的容器
     // 如果内存足够且容器不存在，则创建新容器，将任务状态添加到容器，并从待处理任务集合中移除
     pub fn load_container(&self, env: &SimEnv) {
+        // 刷新缓存策略的环境特征（如果支持）
+        self.refresh_cache_features(env);
+        
         // 用于存储已移除的待处理任务
         let mut removed_pending = vec![];
 
@@ -347,6 +371,40 @@ impl Node {
 
         for (req_id, fnid) in removed_pending {
             self.pending_tasks.borrow_mut().remove(&(req_id, fnid));
+        }
+    }
+
+    /// 注入函数特征到缓存策略（仅对支持的策略有效）
+    fn inject_fn_feature_to_cache(&self, fnid: FnId, env: &SimEnv) {
+        use crate::cache::EnvFeature;
+        
+        let func = env.func(fnid);
+        let feature = EnvFeature {
+            cold_start_time: func.cold_start_time as f32,
+            memory_usage: func.mem,
+            request_frequency: env.help.mech_metric().fn_recent_req_cnt(fnid),
+            current_frame: env.current_frame(),
+        };
+        
+        self.instance_cache_policy.borrow_mut().inject_env_feature(
+            fnid,
+            Box::new(move || feature.clone()),
+        );
+    }
+
+    /// 更新缓存策略中单个函数的特征（已弃用，使用 inject_fn_feature_to_cache）
+    fn update_cache_fn_feature(&self, fnid: FnId, env: &SimEnv) {
+        self.inject_fn_feature_to_cache(fnid, env);
+    }
+
+    /// 刷新缓存中所有函数的环境特征（每帧开始时调用）
+    fn refresh_cache_features(&self, env: &SimEnv) {
+        let fn_containers = self.fn_containers.borrow();
+        let fnids: Vec<FnId> = fn_containers.keys().copied().collect();
+        drop(fn_containers);
+        
+        for fnid in fnids {
+            self.inject_fn_feature_to_cache(fnid, env);
         }
     }
 }

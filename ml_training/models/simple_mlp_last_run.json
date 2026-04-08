@@ -1,0 +1,17 @@
+{
+  "saved_at_utc": "2026-04-07T10:58:21.137179+00:00",
+  "script": "train_simple_mlp.py",
+  "dataset": "datasets/azure_real_cache_decisions.jsonl",
+  "epochs": 50,
+  "batch_size": 64,
+  "lr": 5e-05,
+  "hidden_dim": 64,
+  "seconds": 134.42,
+  "best_val_acc": 0.6223,
+  "final_train_loss": 0.9981766212463379,
+  "final_train_acc": 0.579425,
+  "final_val_loss": 0.9424745869484676,
+  "final_val_acc": 0.6202,
+  "model_path": "models/simple_mlp.pth",
+  "plot_path": "models/simple_mlp_training_curves.png"
+}

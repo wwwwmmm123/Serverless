@@ -23,8 +23,8 @@ use rand::Rng;
 //     a
 // }
 
-#[derive(Clone)]
 // 滑动窗口
+#[derive(Clone, Debug)]
 pub struct Window {
     // 存储的浮点数
     pub queue: VecDeque<f32>,
@@ -52,6 +52,62 @@ impl Window {
         }
         let sum: f32 = self.queue.iter().sum();
         sum / (self.queue.len() as f32)
+    }
+}
+
+/// EWMA (Exponential Weighted Moving Average) - 指数加权移动平均
+/// 用于平滑处理时间序列数据，对近期数据赋予更高权重
+#[derive(Clone, Debug)]
+pub struct EwmaWindow {
+    // 当前的EWMA值
+    pub value: f32,
+    
+    // 衰减因子 (0 < alpha <= 1)
+    // alpha越大，近期值影响越大
+    // alpha越小，历史值影响越大
+    alpha: f32,
+    
+    // 是否已初始化
+    initialized: bool,
+}
+
+impl EwmaWindow {
+    /// 创建EWMA窗口
+    /// alpha: 衰减因子，推荐值0.1-0.5
+    pub fn new(alpha: f32) -> Self {
+        Self {
+            value: 0.0,
+            alpha: alpha.clamp(0.01, 1.0),
+            initialized: false,
+        }
+    }
+
+    /// 使用默认alpha=0.3创建
+    pub fn new_default() -> Self {
+        Self::new(0.3)
+    }
+
+    /// 更新EWMA值
+    /// new_value: 新观测值
+    pub fn push(&mut self, new_value: f32) {
+        if !self.initialized {
+            self.value = new_value;
+            self.initialized = true;
+        } else {
+            // EWMA公式: value = alpha * new_value + (1 - alpha) * old_value
+            self.value = self.alpha * new_value + (1.0 - self.alpha) * self.value;
+        }
+    }
+
+    /// 获取当前EWMA值
+    pub fn avg(&self) -> f32 {
+        self.value
+    }
+
+    /// 重置EWMA
+    pub fn reset(&mut self) {
+        self.value = 0.0;
+        self.initialized = false;
     }
 }
 
