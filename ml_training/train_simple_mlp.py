@@ -81,6 +81,12 @@ class CacheDecisionDataset(Dataset):
                 self.samples.append(json.loads(line))
         
         print(f"[OK] Loaded {len(self.samples):,} samples")
+        self.feature_dim = 8
+        if self.samples:
+            e0 = self.samples[0]["cache_entries"][0]
+            if "downstream_count" in e0:
+                self.feature_dim = 12
+        print(f"[OK] feature_dim={self.feature_dim} (8=Azure/合成, 12=Alibaba DAG)")
     
     def __len__(self):
         return len(self.samples)
@@ -108,9 +114,20 @@ class CacheDecisionDataset(Dataset):
                 min(entry['access_count'] / 100.0, 10.0),  # 限制范围
                 1.0 if entry['is_dag_root'] else 0.0,
             ]
+            if self.feature_dim == 12:
+                feature_vec.extend(
+                    [
+                        min(entry.get("downstream_count", 0) / 10.0, 10.0),
+                        min(entry.get("upstream_count", 0) / 10.0, 10.0),
+                        min(entry.get("dag_depth", 0) / 10.0, 10.0),
+                        1.0 if entry.get("downstream_count", 0) > 0 else 0.0,
+                    ]
+                )
             features.append(feature_vec)
         
         features = torch.tensor(features, dtype=torch.float32)
+        features = torch.nan_to_num(features, nan=0.0, posinf=10.0, neginf=-10.0)
+        features.clamp_(-50.0, 50.0)
         label = sample['optimal_evict_idx']
         
         return features, label
@@ -279,7 +296,18 @@ def evaluate(model, dataloader, criterion, device):
 
 def main():
     parser = argparse.ArgumentParser(description="Stable offline training")
-    parser.add_argument('--dataset', type=str, required=True)
+    parser.add_argument(
+        '--dataset',
+        type=str,
+        default='datasets/alibaba_dag_cache_decisions.jsonl',
+        help='JSONL dataset path',
+    )
+    parser.add_argument(
+        '--feature_dim',
+        type=int,
+        default=None,
+        help='Override feature dim (default: infer from JSONL)',
+    )
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=5e-5)  # 更小的学习率
@@ -314,6 +342,8 @@ def main():
     
     # 加载数据
     full_dataset = CacheDecisionDataset(args.dataset)
+    feature_dim = args.feature_dim if args.feature_dim is not None else full_dataset.feature_dim
+    print(f"[OK] 使用 feature_dim={feature_dim} 训练")
     
     # 划分数据集
     val_size = int(len(full_dataset) * 0.2)
@@ -340,7 +370,7 @@ def main():
     
     # 模型
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = SimpleCacheMLP(feature_dim=8, hidden_dim=args.hidden_dim).to(device)
+    model = SimpleCacheMLP(feature_dim=feature_dim, hidden_dim=args.hidden_dim).to(device)
     
     params = sum(p.numel() for p in model.parameters())
     print(f"\nModel: Simple MLP")
@@ -389,6 +419,7 @@ def main():
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'val_acc': val_acc,
+                'feature_dim': feature_dim,
             }, args.save_path)
             print(f"  [OK] Best model saved (Val Acc: {val_acc:.3f})")
     
@@ -411,6 +442,7 @@ def main():
         "saved_at_utc": datetime.now(timezone.utc).isoformat(),
         "script": "train_simple_mlp.py",
         "dataset": args.dataset,
+        "feature_dim": feature_dim,
         "epochs": args.epochs,
         "batch_size": args.batch_size,
         "lr": args.lr,

@@ -8,6 +8,13 @@ os.chdir(CUR_FDIR)
 
 import re
 
+def _os_open_path(path: str) -> str:
+    abs_path = os.path.abspath(path)
+    # Windows long-path support for very long record filenames.
+    if os.name == "nt" and not abs_path.startswith("\\\\?\\"):
+        return "\\\\?\\" + abs_path
+    return abs_path
+
 def conf_str(conf):
     rand_seed = conf['rand_seed']
     request_freq = conf['request_freq']
@@ -245,7 +252,7 @@ def load_record_from_file(filename):
     cache_filename = "cache/" + filename
     
     try:
-        f= open(cache_filename, 'r') 
+        f= open(_os_open_path(cache_filename), 'r') 
         cacherecord=json.load(f)
     except:
         cacherecord=None
@@ -265,7 +272,7 @@ def load_record_from_file(filename):
         # seek to filesize - 1000 
         # read lines
         # parse last third line
-        with open(f"../serverless_sim/records/{filename}", 'r') as f:
+        with open(_os_open_path(f"../serverless_sim/records/{filename}"), 'r') as f:
             all=f.read()
             frames_obj=json.loads(all)
             frames=[]
@@ -292,7 +299,7 @@ def load_record_from_file(filename):
 
             # save cache
             os.makedirs("cache", exist_ok=True)
-            with open(cache_filename, 'w') as f:
+            with open(_os_open_path(cache_filename), 'w') as f:
                 json.dump({
                     'cost_per_req': record.cost_per_req,
                     'time_per_req': record.time_per_req,
@@ -323,6 +330,8 @@ def load_record_from_file(filename):
     
         
 def avg_records(records):
+    if len(records)==0:
+        raise ValueError("avg_records got empty records")
     # check confstr is same
     for i in range(1,len(records)):
         if records[i].configstr!=records[0].configstr:

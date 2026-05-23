@@ -9,10 +9,12 @@ Attention-LRU 模型推理服务
 
 from flask import Flask, request, jsonify
 import torch
+import torch.nn.functional as F_nn
 import argparse
 import sys
 import os
 import time
+from typing import Optional
 
 sys.path.append(os.path.dirname(__file__))
 from attention_lru import AttentionLRU, extract_features
@@ -22,6 +24,18 @@ app = Flask(__name__)
 # 全局模型
 model = None
 model_load_time = None
+
+
+def _align_feature_width(x: torch.Tensor, feature_dim: int) -> torch.Tensor:
+    """Rust 端仍为 8 维时，右侧补零以匹配 12 维 DAG 模型。"""
+    if x.dim() == 1:
+        x = x.unsqueeze(0)
+    c = x.shape[-1]
+    if c < feature_dim:
+        x = F_nn.pad(x, (0, feature_dim - c))
+    elif c > feature_dim:
+        x = x[..., :feature_dim]
+    return x
 
 
 @app.route('/health', methods=['GET'])
@@ -63,6 +77,7 @@ def predict():
         # 解析请求
         data = request.get_json()
         features = torch.tensor(data['features'], dtype=torch.float32)
+        features = _align_feature_width(features, model.feature_dim)
         can_be_evicted = torch.tensor(data.get('can_be_evicted', [True] * len(features)), dtype=torch.bool)
         
         # 推理
@@ -70,7 +85,8 @@ def predict():
         
         # 获取所有分数（用于调试）
         with torch.no_grad():
-            scores = model(features).tolist()
+            scores = model(features)
+            scores = scores.tolist() if scores.dim() == 1 else scores.squeeze(0).tolist()
         
         inference_time = (time.time() - start_time) * 1000  # ms
         
@@ -107,6 +123,7 @@ def get_attention():
     try:
         data = request.get_json()
         features = torch.tensor(data['features'], dtype=torch.float32)
+        features = _align_feature_width(features, model.feature_dim)
         
         # 获取注意力权重
         attn_weights = model.get_attention_weights(features)
@@ -119,29 +136,30 @@ def get_attention():
         return jsonify({'error': str(e)}), 400
 
 
-def load_model(model_path: str):
+def load_model(model_path: str, feature_dim_override: Optional[int] = None):
     """加载模型"""
     global model, model_load_time
     
     print(f"Loading model from {model_path}...")
     
     try:
-        # 创建模型
+        checkpoint = torch.load(model_path, map_location='cpu')
+        fdim = feature_dim_override if feature_dim_override is not None else int(
+            checkpoint.get("feature_dim", 8)
+        )
         model = AttentionLRU(
-            feature_dim=8,
+            feature_dim=fdim,
             hidden_dim=64,
             num_heads=4
         )
-        
-        # 加载权重
-        checkpoint = torch.load(model_path, map_location='cpu')
         model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
         
         model_load_time = time.strftime('%Y-%m-%d %H:%M:%S')
         
         total_params = sum(p.numel() for p in model.parameters())
-        print(f"✓ Model loaded successfully")
+        print("[OK] Model loaded successfully")
+        print(f"  - feature_dim: {fdim}")
         print(f"  - Parameters: {total_params:,}")
         print(f"  - Model size: ~{total_params * 4 / 1024:.1f} KB")
         
@@ -155,7 +173,7 @@ def load_model(model_path: str):
         return True
     
     except Exception as e:
-        print(f"✗ Failed to load model: {e}")
+        print(f"[ERR] Failed to load model: {e}")
         return False
 
 
@@ -167,6 +185,12 @@ def main():
                        help='Port to serve on (default: 5000)')
     parser.add_argument('--host', type=str, default='127.0.0.1',
                        help='Host to bind to (default: 127.0.0.1)')
+    parser.add_argument(
+        '--feature_dim',
+        type=int,
+        default=None,
+        help='Override feature_dim in checkpoint (older models may omit this key)',
+    )
     
     args = parser.parse_args()
     
@@ -178,11 +202,12 @@ Configuration:
   - Model: {args.model}
   - Host: {args.host}
   - Port: {args.port}
+  - feature_dim override: {args.feature_dim}
 {'='*60}
 """)
     
     # 加载模型
-    if not load_model(args.model):
+    if not load_model(args.model, args.feature_dim):
         print("\nPlease train a model first:")
         print("  python train_online.py --episodes 100")
         return

@@ -3,5 +3,6 @@ Cargo.lock
 records*
 log
 module_conf_es.json
-cache
+/cache/
 azure-trace
+debug_log.txt

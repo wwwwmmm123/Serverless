@@ -10,6 +10,7 @@ import yaml
 import re
 import matplotlib.pyplot as plt
 import numpy as np
+import textwrap
 
 ### doc: https://fvd360f8oos.feishu.cn/docx/RMjfdhRutoDmOkx4f4Lcl1sjnzd
 
@@ -172,22 +173,37 @@ def get_each_group_prev_avg_cnt_file__compute_avg(drawconf,conf_2_files):
     # sort
     for confstr in conf_2_files:
         conf_2_files[confstr].sort()
-    # left avg_cnt files
-    for confstr in conf_2_files:
-        conf_2_files[confstr]=conf_2_files[confstr][:avg_cnt]
     # transform files 2 records
     conf_2_records={}
     for confstr in conf_2_files:
         file_records=[]
         for file in conf_2_files[confstr]:
-            file_records.append(records_read.load_record_from_file(file))
+            try:
+                # 尝试加载文件，收集前 avg_cnt 个“有效文件”
+                rec = records_read.load_record_from_file(file)
+                file_records.append(rec)
+                if len(file_records) >= avg_cnt:
+                    break
+            except Exception as e:
+                # 坏文件直接跳过
+                print(f"!!!  跳过坏文件: {file}")
+                continue
+        if len(file_records) < avg_cnt:
+            print(f"!!! 配置有效文件不足: {confstr}, need={avg_cnt}, got={len(file_records)}")
         conf_2_records[confstr]=file_records
     # compute avg and transform records 2 one record
     conf_2_avg_record={}
+    skipped_empty_configs=[]
     for confstr in conf_2_files:
         records=conf_2_records[confstr]
+        if len(records)==0:
+            print(f"!!! 配置无有效记录(全是坏文件或读取失败): {confstr}")
+            skipped_empty_configs.append(confstr)
+            continue
         avg_record=records_read.avg_records(records)
         conf_2_avg_record[confstr]=avg_record
+    if len(skipped_empty_configs)>0:
+        print(f"!!! 共跳过 {len(skipped_empty_configs)} 个无有效记录的配置")
     return conf_2_avg_record
 
 # [
@@ -344,14 +360,63 @@ def draw_with_draw_meta(drawmeta,conf):
     colors=["#FC6B05","#FFB62B","#65B017","#99D8DB","#9BB7BB","#32CD32","#228B22","#8A2BE2"]
     
     plotidx=0
+    
+    def extract_strategy_name(full_label):
+        """
+        从完整的策略标签中提取策略名称，去掉前缀
+        例如: 'xxx.xxx.ic(lru)' -> 'lru'
+        """
+        # 查找 .ic( 模式
+        if '.ic(' in full_label:
+            start = full_label.rfind('.ic(') + 4  # 跳过 '.ic('
+            end = full_label.find(')', start)
+            if end != -1:
+                return full_label[start:end]
+        
+        # 如果没有 .ic( 模式，提取最后一个点之后的内容
+        if '.' in full_label:
+            return full_label.split('.')[-1]
+        
+        # 如果都没有，返回原标签
+        return full_label
+    
+    def wrap_legend_label(label, width=42):
+        # 先提取策略名称，再换行
+        short_label = extract_strategy_name(label)
+        return "\n".join(textwrap.wrap(short_label, width=width))
+    
+    def add_unit_to_metric(metric_name):
+        """根据指标名称添加单位"""
+        metric_lower = metric_name.lower()
+        
+        # 如果已经包含单位，直接返回
+        if '(' in metric_name and ')' in metric_name:
+            return metric_name
+        
+        # 根据指标名称添加对应单位
+        if 'cost' in metric_lower:
+            return f"{metric_name} ($)"
+        elif 'latency' in metric_lower:
+            return f"{metric_name} (ms)"
+        elif 'throughput' in metric_lower or 'throuphput' in metric_lower:
+            return f"{metric_name} (req/s)"
+        elif 'container' in metric_lower and 'count' in metric_lower:
+            return f"{metric_name}"
+        elif 'ratio' in metric_lower or 'quality' in metric_lower:
+            return f"{metric_name}"
+        else:
+            return metric_name
+
     for plot in plots:
         meta=drawmeta[plotidx]
         groups=meta['groups']
         plot.set_xticks(index)
         plot.set_xticklabels(conf['group']['type_alias'])
 
-        plot.set_xlabel(conf['group']['alias'])
-        plot.text(-1.26*(len(plots)-plotidx)+1.76, 1.05, meta['value_y'], ha='center', va='center', rotation=0, transform=plt.gca().transAxes)
+        plot.set_xlabel(conf['group']['alias'],fontsize=12)
+        # 为指标名称添加单位
+        metric_with_unit = add_unit_to_metric(meta['value_y'])
+        plot.text(-1.26*(len(plots)-plotidx)+1.76, 1.05, metric_with_unit, ha='center', va='center', rotation=0, transform=plt.gca().transAxes,fontsize=12)
         # plot.set_ylabel(meta['value_y'],labelpad=10, rotation=0, verticalalignment='top')
 
         model_value={
@@ -430,20 +495,24 @@ def draw_with_draw_meta(drawmeta,conf):
             for barlevel,bar_values in reversed(list(enumerate(bars_values))):
                 plot.bar(index+value_idx*bar_width,bar_values,bar_width,
                     color=(leveled_color(colors[value_idx%len(colors)],barlevel)),
-                    label=value_alias,edgecolor="black"
+                    label=wrap_legend_label(value_alias),edgecolor="black"
                 )
             value_idx+=1
         plotidx+=1
 # 调整子图的边距以确保图例不会覆盖图表内容
 
     
+    # 获取图例的 handles 和 labels（从最后一个子图）
+    handles, labels = plots[-1].get_legend_handles_labels() if isinstance(plots, (list, np.ndarray)) else plots.get_legend_handles_labels()
+    
     plt.tight_layout()
 
-    plt.subplots_adjust(top=0.9,right=0.6,wspace=0.25, hspace=0.25)
-    # plt.legend(loc='upper right')
+    # 调整子图间距，为右侧图例留出空间
+    plt.subplots_adjust(top=0.95, bottom=0.12, left=0.1, right=0.66, wspace=0.25, hspace=0.35)
     
-    # 调整图例位置到图表外
-    plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize='xx-small')
+    # 图例位置：使用 fig.legend() 在整个图表的右侧竖直排列
+    fig.legend(handles, labels, loc='upper left', bbox_to_anchor=(0.68, 0.95), 
+               fontsize=14, frameon=True, edgecolor='black')
 
     # plt.legend(fontsize='xx-small')
     

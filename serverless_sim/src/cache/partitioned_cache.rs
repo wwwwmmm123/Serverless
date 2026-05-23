@@ -60,7 +60,7 @@ impl PartitionStats {
 /// - **轻量级**：资源占用少的函数
 pub struct PartitionedCache {
     total_capacity: usize,
-    partitions: HashMap<FnPartition, Box<dyn InstanceCachePolicy<FnId>>>,
+    partitions: HashMap<FnPartition, LRUCache<FnId>>,
     fn_to_partition: HashMap<FnId, FnPartition>,
     partition_capacities: HashMap<FnPartition, usize>,
     // 缓存环境引用用于分类
@@ -99,10 +99,7 @@ impl PartitionedCache {
         for (partition, ratio) in ratios.iter() {
             let partition_cap = ((capacity as f32) * ratio).max(1.0).ceil() as usize;
             partition_capacities.insert(*partition, partition_cap);
-            partitions.insert(
-                *partition,
-                Box::new(LRUCache::new(partition_cap)) as Box<dyn InstanceCachePolicy<FnId>>,
-            );
+            partitions.insert(*partition, LRUCache::new(partition_cap));
             partition_stats.insert(*partition, PartitionStats::new());
         }
 
@@ -138,6 +135,17 @@ impl PartitionedCache {
             return ratios;
         }
 
+        // 新增：智能分配模式（基于函数数量和访问频率）
+        if config == "smart" || config == "auto" {
+            // 初始使用优化的默认配置（基于经验）
+            // CPU密集型和轻量级通常访问更频繁，分配更多空间
+            ratios.insert(FnPartition::CpuIntensive, 0.35);    // CPU密集型（较多）
+            ratios.insert(FnPartition::Lightweight, 0.35);     // 轻量级（访问频繁）
+            ratios.insert(FnPartition::DataIntensive, 0.15);   // 数据密集型（较少）
+            ratios.insert(FnPartition::MemoryHeavy, 0.15);     // 内存密集型（较少）
+            return ratios;
+        }
+
         for part in config.split(',') {
             let kv: Vec<&str> = part.split(':').collect();
             if kv.len() == 2 {
@@ -156,34 +164,51 @@ impl PartitionedCache {
 
         let sum: f32 = ratios.values().sum();
         if (sum - 1.0).abs() > 0.01 {
-            log::warn!("Partition ratios sum={}, using equal", sum);
+            log::warn!("Partition ratios sum={}, using smart allocation", sum);
             ratios.clear();
-            ratios.insert(FnPartition::CpuIntensive, 0.25);
-            ratios.insert(FnPartition::DataIntensive, 0.25);
-            ratios.insert(FnPartition::MemoryHeavy, 0.25);
-            ratios.insert(FnPartition::Lightweight, 0.25);
+            // 使用智能分配而非简单平均
+            ratios.insert(FnPartition::CpuIntensive, 0.35);
+            ratios.insert(FnPartition::Lightweight, 0.35);
+            ratios.insert(FnPartition::DataIntensive, 0.15);
+            ratios.insert(FnPartition::MemoryHeavy, 0.15);
         }
 
         ratios
     }
 
-    /// 根据函数特征分类
+    /// 根据函数特征分类（改进版：多维度评分）
     fn classify_function(&self, fnid: FnId, env: &SimEnv) -> FnPartition {
         let func = env.func(fnid);
 
-        // 分类规则（可根据实验调整阈值）
-        if func.mem > 700.0 {
+        // 计算归一化特征分数（0-1范围）
+        let cpu_score = (func.cpu / 100.0).min(1.0);
+        let mem_score = (func.mem / 1024.0).min(1.0);
+        let data_score = (func.out_put_size / 100.0).min(1.0);
+        
+        // 多维度加权评分，找出主导特征
+        let cpu_weight = cpu_score * 1.2;  // CPU权重稍高（影响执行时间）
+        let mem_weight = mem_score * 1.0;
+        let data_weight = data_score * 0.8;
+        
+        // 轻量级判断：所有特征都很低
+        if cpu_score < 0.3 && mem_score < 0.3 && data_score < 0.3 {
+            return FnPartition::Lightweight;
+        }
+        
+        // 选择得分最高的特征作为分类依据
+        if mem_weight > cpu_weight && mem_weight > data_weight && mem_score > 0.6 {
             return FnPartition::MemoryHeavy;
         }
-
-        if func.out_put_size > 50.0 {
+        
+        if data_weight > cpu_weight && data_weight > mem_weight && data_score > 0.4 {
             return FnPartition::DataIntensive;
         }
-
-        if func.cpu > 50.0 {
+        
+        if cpu_weight >= mem_weight && cpu_weight >= data_weight && cpu_score > 0.4 {
             return FnPartition::CpuIntensive;
         }
-
+        
+        // 默认：特征不明显或中等，归为轻量级
         FnPartition::Lightweight
     }
 
@@ -250,20 +275,35 @@ impl PartitionedCache {
                 "Dynamic rebalancing at frame {}: total_demand={}, old_caps={:?}, new_caps={:?}",
                 current_frame, total_demand, old_capacities, new_capacities
             );
-
-            // 重建分区（使用新容量）
+            // 重建分区（使用新容量），并迁移旧分区中的key
+            let old_partitions = std::mem::take(&mut self.partitions);
             for (partition, new_cap) in new_capacities.iter() {
                 self.partition_capacities.insert(*partition, *new_cap);
-                // 重新创建该分区的缓存策略
-                self.partitions.insert(
-                    *partition,
-                    Box::new(LRUCache::new(*new_cap)) as Box<dyn InstanceCachePolicy<FnId>>,
-                );
+                let mut new_partition = LRUCache::new(*new_cap);
+
+                // 保留旧key（按MRU优先），避免动态重平衡时缓存被整体清空
+                let old_keys = old_partitions
+                    .get(partition)
+                    .map(|cache| cache.keys_mru_to_lru())
+                    .unwrap_or_default();
+                for key in old_keys.iter().rev() {
+                    let (_, ok) = new_partition.put(*key, Box::new(|_| false));
+                    if !ok {
+                        break;
+                    }
+                }
+                self.partitions.insert(*partition, new_partition);
             }
 
             // 重置统计信息
-            for stats in self.partition_stats.values_mut() {
+            for (partition, stats) in self.partition_stats.iter_mut() {
                 stats.reset();
+                let size = self
+                    .partitions
+                    .get(partition)
+                    .map(|cache| cache.keys_mru_to_lru().len())
+                    .unwrap_or(0);
+                stats.current_size = size;
             }
         }
 
@@ -289,6 +329,15 @@ impl InstanceCachePolicy<FnId> for PartitionedCache {
         // 尝试从分区缓存中获取
         if let Some(policy) = self.partitions.get_mut(&partition) {
             let result = policy.get(key);
+            if result.is_none() {
+                log::warn!(
+                    "PartitionedCache miss: key={}, partition={:?}, known_mapping={}, dynamic_enabled={}",
+                    key,
+                    partition,
+                    self.fn_to_partition.contains_key(&key),
+                    self.dynamic_enabled
+                );
+            }
             
             // 更新统计
             if let Some(stats) = self.partition_stats.get_mut(&partition) {

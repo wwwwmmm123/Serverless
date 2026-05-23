@@ -194,15 +194,41 @@ impl MechConfig {
                 Box::new(crate::cache::weighted_lru::WeightedLRU::new(capacity, &weight_config))
             }
             "env_aware_lru" => {
-                // 格式: "capacity" 或 "capacity:c:0.3,m:0.2,f:0.3,r:0.2"
-                let parts: Vec<&str> = arg.split(':').collect();
-                let capacity = parts[0].parse::<usize>().expect("env_aware_lru needs capacity");
-                let weight_config = if parts.len() > 1 {
-                    parts[1..].join(":")
+                // 格式:
+                // - "capacity"
+                // - "capacity:c:0.3,m:0.2,..."（权重串里可含冒号，故只对第一个 ':' 分割）
+                // - "capacity|adaptive" / "capacity|adaptive||c:0.5,m:0.1,..."（与 batch_run.yml 注释一致）
+                let (capacity, weight_config) = if arg.contains('|') {
+                    let mut it = arg.splitn(2, '|');
+                    let cap_s = it.next().unwrap().trim();
+                    let cap = cap_s
+                        .parse::<usize>()
+                        .unwrap_or_else(|e| panic!("env_aware_lru needs usize capacity before '|': {:?}, err={}", arg, e));
+                    let rest = it.next().map(|s| s.trim()).unwrap_or("default");
+                    let wc = if rest.is_empty() {
+                        "default".to_string()
+                    } else {
+                        rest.to_string()
+                    };
+                    (cap, wc)
                 } else {
-                    "default".to_string()
+                    let mut it = arg.splitn(2, ':');
+                    let cap_s = it.next().unwrap().trim();
+                    let cap = cap_s
+                        .parse::<usize>()
+                        .unwrap_or_else(|e| panic!("env_aware_lru needs usize capacity: {:?}, err={}", arg, e));
+                    let wc = it
+                        .next()
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("default")
+                        .to_string();
+                    (cap, wc)
                 };
-                Box::new(crate::cache::env_aware_lru::EnvAwareLRU::new(capacity, &weight_config))
+                Box::new(crate::cache::env_aware_lru::EnvAwareLRU::new(
+                    capacity,
+                    &weight_config,
+                ))
             }
             "partitioned" => {
                 // 格式: "capacity|partition_config"
@@ -215,6 +241,15 @@ impl MechConfig {
                 Box::new(crate::cache::partitioned_cache::PartitionedCache::new(capacity, partition_config))
             }
             "no_evict" => Box::new(crate::cache::no_evict::NoEvict::new()),
+            "attention_lru" => {
+                // 格式: "capacity" 或 "capacity|http://host:port"
+                let parts: Vec<&str> = arg.split('|').collect();
+                let capacity = parts.get(0)
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .expect("attention_lru needs capacity (format: capacity or capacity|http://host:port)");
+                let url = parts.get(1).map(|s| *s).unwrap_or("");
+                Box::new(crate::cache::attention_lru::AttentionLRU::new(capacity, url))
+            }
             _ => panic!("new_instance_cache_policy: unknown policy {}", policy),
         }
     }

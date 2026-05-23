@@ -173,12 +173,11 @@ class AttentionLRU(nn.Module):
         with torch.no_grad():
             scores = self.forward(features)  # [N]
             
-            # 不可驱逐的函数设为无穷大
+            # 与 CrossEntropy 训练一致：logit 越大表示越应被驱逐
             scores = scores.clone()
-            scores[~can_be_evicted] = float('inf')
+            scores[~can_be_evicted] = float('-inf')
             
-            # 选择分数最低的
-            evict_idx = torch.argmin(scores).item()
+            evict_idx = torch.argmax(scores).item()
         
         return evict_idx
     

@@ -4,6 +4,7 @@ pub mod no_evict;
 pub mod weighted_lru;
 pub mod partitioned_cache;
 pub mod env_aware_lru;
+pub mod attention_lru;
 
 use std::{cell::RefCell, cmp::Eq, fmt::Debug, hash::Hash, rc::Rc};
 

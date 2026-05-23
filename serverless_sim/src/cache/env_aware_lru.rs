@@ -181,12 +181,12 @@ impl EnvAwareLRU {
                 frames_since_access * self.weight_config.recency_weight +
                 (feature.memory_usage / 100.0) * self.weight_config.memory_weight;
 
-            // 分数 = -重要性/收益（越小越该驱逐）
-            -(importance + 1.0) / (eviction_benefit + 1.0)
+            // 分数 = 重要性/收益（越大越重要，越小越该被驱逐）
+            (importance + 1.0) / (eviction_benefit + 1.0)
         } else {
             // === 回退策略：仅使用访问模式 ===
             let frequency = entry.access_count as f32;
-            -(frequency + 1.0) / (frames_since_access + 1.0)
+            (frequency + 1.0) / (frames_since_access + 1.0)
         }
     }
 

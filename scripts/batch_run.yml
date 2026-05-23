@@ -1,21 +1,21 @@
-run_time: 1
-
+run_time: 3  # 每个配置跑3次取平均
+ 
 params:
   request_freq:
   - low:
-  - middle:
+  # - middle:        # 固定中频（策略差异最明显）
   # - high:
   dag_type:
-  - single:
+  # - single:
   # - chain:  # DISABLED - not supported by fn_dag.rs:559
-  - dag:
-  # - mix:
+  # - dag:           # 固定DAG类型
+  - mix:
   no_mech_latency:
-  - true:
+  - true:          # 固定无机制延迟
   # - false:
-  use_ewma_freq:  # NEW: Enable EWMA for frequency tracking
-  - false:  # Fixed window (baseline)
-  - true:   # EWMA (improvement 2)
+  use_ewma_freq:   # NEW: Enable EWMA for frequency tracking
+  - false:        # Fixed window (baseline)
+  # - true:          # 固定启用EWMA
 
 mech_scale_sche:
   scale_sche_joint:
@@ -35,25 +35,25 @@ mech_scale_sche:
     # - []
     - [{'careful_down':''}]
 
-  scale_sche_separated:
-    scale_num:
-    - temp_scaler:
-    - hpa:
-    - lass:
-    scale_down_exec:
-    - default:
-    scale_up_exec:
-    - least_task:
-    sche:
-    # - greedy:
-    # - hash:
-    # - random:
-    - load_least:
-    # - rotate:
-    - pass:
-    filter:
-    # - []
-    - [{'careful_down':''}]
+  # scale_sche_separated:
+  #   scale_num:
+  #   - temp_scaler:
+  #   - hpa:
+  #   - lass:
+  #   scale_down_exec:
+  #   - default:
+  #   scale_up_exec:
+  #   - least_task:
+  #   sche:
+  #   # - greedy:
+  #   # - hash:
+  #   # - random:
+  #   - load_least:
+  #   # - rotate:
+  #   - pass:
+  #   filter:
+  #   # - []
+  #   - [{'careful_down':''}]
     
   # no_scale:
   #   scale_num:
@@ -73,36 +73,42 @@ mech_scale_sche:
 
 mech_other:
   instance_cache_policy:
-  # ========== Baseline Strategies ==========
-  - lru: "10"                                      # Traditional LRU baseline
-  - fifo: "10"                                     # FIFO baseline
-  - no_evict:                                      # Ideal case (no eviction)
+  # ========================================================
+  # 核心策略对比实验配置
+  # 注意：使用 attention_lru 前需先启动模型服务：
+  #   cd d:\serverless\serverless_sim\ml_training
+  #   python serve_model.py --model models/attention_lru_cluster2018_v5.pth --port 5000
+  # ========================================================
   
-  # ========== New Strategy: Weighted LRU ==========
-  - weighted_lru: "10:r:0.5,f:0.5"                # Balanced weights
-  - weighted_lru: "10:r:0.7,f:0.3"                # Recency-biased
-  - weighted_lru: "10:r:0.3,f:0.7"                # Frequency-biased
+  # ==================== 1. 传统基线策略 ====================
+  # - lru: "10"                                        # (6) 传统LRU策略
+  # - fifo: "10"                                       # (7) 传统FIFO策略
   
-  # ========== New Strategy: EnvAware LRU (Recommended) ==========
-  - env_aware_lru: "10:c:0.3,m:0.2,f:0.3,r:0.2"  # Balanced config (static)
-  - env_aware_lru: "10:c:0.5,m:0.1,f:0.3,r:0.1"  # Cold-start focused (static)
-  - env_aware_lru: "10:c:0.2,m:0.1,f:0.5,r:0.2"  # Frequency focused (static)
+  # ==================== 2. 环境感知LRU策略 ====================
+  # 2.1 静态权重配置
+  # - env_aware_lru: "10:c:0.3,m:0.2,f:0.3,r:0.2"     # (1) 均衡配置
+  # - env_aware_lru: "10:c:0.5,m:0.1,f:0.3,r:0.1"     # (2) 冷启动优先
+  # - env_aware_lru: "10:c:0.2,m:0.1,f:0.5,r:0.2"     # (3) 频率优先（最优教师策略）
   
-  # ========== NEW: Improvement 1 - Adaptive Weights ==========
-  - env_aware_lru: "10|adaptive"                  # Adaptive mode with default init
-  - env_aware_lru: "10|adaptive||c:0.5,m:0.1,f:0.3,r:0.1"  # Adaptive + custom init
+  # 2.2 自适应模式
+  - env_aware_lru: "10:adaptive"                     # (4) 自适应模式（权重自动调整）
+  # - env_aware_lru: "10|adaptive|c:0.5,m:0.1,f:0.3,r:0.1"  # (5) 自适应+初始权重
   
-  # ========== New Strategy: Partitioned Cache ==========
-  # TEMPORARILY DISABLED - causes GC timeout, needs investigation
-  # - partitioned: "10|equal"                       # Equal allocation (static)
-  # - partitioned: "10|cpu:0.5,data:0.3,mem:0.15,light:0.05"  # CPU-biased (static)
+  # ==================== 3. 加权LRU策略 ====================
+  # - weighted_lru: "10:r:0.3,f:0.7"                   # (8) 加权LRU（最近性30% + 频率70%）
   
-  # ========== NEW: Improvement 3 - Dynamic Partitioning ==========
-  # - partitioned: "10|dynamic"                     # Dynamic rebalancing + equal init
-  # - partitioned: "10|dynamic|cpu:0.5,data:0.3,mem:0.15,light:0.05"  # Dynamic + CPU init
+  # ==================== 暂时不运行的策略（已注释）====================
+  # # 分区缓存策略
+  # - partitioned: "10|cpu:0.35,data:0.35,mem:0.15,light:0.15"  # 固定权重分区
+  # - partitioned: "10|equal"                          # 平均分配（25% × 4分区）
+  # - partitioned: "10|dynamic|smart"                  # 动态分区（运行时自适应调整）
+  # 
+  # # 机器学习策略（需先启动模型服务）
+  # # python serve_model.py --model models/attention_lru_cluster2018_v5.pth --port 5000
+  # - attention_lru: "10"                              # Attention-LRU（智能学习策略）
   
-  # ========== Capacity Comparison (Optional) ==========
-  # - lru: "5"                                     # Small capacity
-  # - lru: "15"                                    # Large capacity
-  # - env_aware_lru: "5:c:0.3,m:0.2,f:0.3,r:0.2"
-  # - env_aware_lru: "15:c:0.3,m:0.2,f:0.3,r:0.2"
+  # ==================== 实验对比说明 ====================
+  # 对比1：传统策略基线 (LRU vs FIFO vs 加权LRU)
+  # 对比2：环境感知LRU不同权重配置 (均衡 vs 冷启动优先 vs 频率优先)
+  # 对比3：静态权重 vs 自适应权重 (静态配置 vs adaptive vs adaptive+初始权重)
+  # 对比4：分区容量分配影响 (CPU+数据优先 vs 平均 vs CPU+轻量优先)

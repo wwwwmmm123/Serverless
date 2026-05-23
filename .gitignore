@@ -1,13 +1,43 @@
 serverless
-__pycache__
-checkpoints
-logs
-mat
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+checkpoints/
+logs/
+mat/
 exprun*
-runs
-multiagent
-adaptive_trans
+runs/
+multiagent/
+adaptive_trans/
 adaptive-transformers-in-rl-master.zip
-log
-MAPPO_MPE
+log/
+MAPPO_MPE/
 run_multi_fn_dag.py
+
+# Markdown docs (keep ml_training/ only)
+*.md
+!ml_training/
+!ml_training/**
+
+# ML training artifacts (large files)
+ml_training/datasets/
+ml_training/models/
+ml_training/figures/
+
+# PyTorch / model checkpoints
+*.pth
+*.pt
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/

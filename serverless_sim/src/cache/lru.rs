@@ -122,6 +122,21 @@ impl<Payload: Eq + Hash + Clone + Debug> LRUCache<Payload> {
         next.borrow_mut().prev = Some(prev);
     }
 
+    /// Returns keys from most-recently-used to least-recently-used.
+    pub fn keys_mru_to_lru(&self) -> Vec<Payload> {
+        let mut keys = Vec::with_capacity(self.cache.len());
+        let mut cur = self.head.borrow().next.clone();
+        while let Some(node) = cur {
+            let key = node.borrow().key.clone();
+            if key.is_none() {
+                break;
+            }
+            keys.push(key.unwrap());
+            cur = node.borrow().next.clone();
+        }
+        keys
+    }
+
     #[cfg(test)]
     pub fn cmp_list(&self, list: Vec<Payload>) {
         assert_eq!(self.cache.len(), list.len());

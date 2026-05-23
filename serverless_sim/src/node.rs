@@ -355,7 +355,33 @@ impl Node {
                     continue;
                 }
 
-                self.instance_cache_policy.borrow_mut().get(fnid).unwrap();
+                let cache_hit = self.instance_cache_policy.borrow_mut().get(fnid);
+                if cache_hit.is_none() {
+                    log::error!(
+                        "Cache-state mismatch: node={}, fn={}, req={}, frame={}, config={}. \
+container exists but cache get() missed; continuing to avoid panic",
+                        self.node_id(),
+                        fnid,
+                        req_id,
+                        env.current_frame(),
+                        env.help.config().str()
+                    );
+                    // Try self-healing: re-insert existing container key into cache index.
+                    let (_evicted, repaired) = self
+                        .instance_cache_policy
+                        .borrow_mut()
+                        .put(fnid, Box::new(|_| false));
+                    if !repaired {
+                        log::error!(
+                            "Cache-state mismatch repair failed: node={}, fn={}, req={}, frame={}, config={}",
+                            self.node_id(),
+                            fnid,
+                            req_id,
+                            env.current_frame(),
+                            env.help.config().str()
+                        );
+                    }
+                }
                 // add to container
 
                 assert!(fncon
